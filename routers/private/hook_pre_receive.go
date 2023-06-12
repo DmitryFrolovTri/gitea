@@ -151,7 +151,7 @@ func calculateSizeOfObjectsFromCache(newCommitObjects, oldCommitObjects, otherCo
 			}
 		}
 	}
-	return
+	return addedSize, removedSize
 }
 
 // convertObjectsToMap takes a newline-separated string of git objects and
@@ -184,7 +184,6 @@ func convertObjectsToSlice(objects string) (objectIDs []string) {
 // and load compressed object size in bytes into objectSizes map
 // using `git verify-pack -v` output
 func loadObjectSizesFromPack(ctx *gitea_context.PrivateContext, opts *git.RunOpts, objectIDs []string, objectsSizes map[string]int64) error {
-
 	// Find the path from GIT_QUARANTINE_PATH environment variable (path to the pack file)
 	var packPath string
 	for _, envVar := range opts.Env {
@@ -244,7 +243,7 @@ func loadObjectSizesFromPack(ctx *gitea_context.PrivateContext, opts *git.RunOpt
 				log.Trace("Failed to parse size for object %s: %v", objectID, err)
 				continue
 			}
-			i += 1
+			i++
 			objectsSizes[objectID] = size
 		}
 	}
@@ -269,7 +268,7 @@ func loadObjectsSizesViaCatFile(ctx *gitea_context.PrivateContext, opts *git.Run
 	for _, objectID := range objectIDs {
 		_, exists := objectsSizes[objectID]
 
-		//if object doesn't yet have size in objectsSizes add it for further processing
+		// If object doesn't yet have size in objectsSizes add it for further processing
 		if !exists {
 			reducedObjectIDs = append(reducedObjectIDs, objectID)
 		}
@@ -308,7 +307,7 @@ func loadObjectsSizesViaBatch(ctx *gitea_context.PrivateContext, repoPath string
 	for _, objectID := range objectIDs {
 		_, exists := objectsSizes[objectID]
 
-		//if object doesn't yet have size in objectsSizes add it for further processing
+		// If object doesn't yet have size in objectsSizes add it for further processing
 		if !exists {
 			reducedObjectIDs = append(reducedObjectIDs, objectID)
 		}
@@ -322,7 +321,7 @@ func loadObjectsSizesViaBatch(ctx *gitea_context.PrivateContext, repoPath string
 		if err != nil {
 			return err
 		}
-		i += 1
+		i++
 		line, err := rd.ReadString('\n')
 		if err != nil {
 			return err
@@ -394,10 +393,6 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 			return
 		}
 
-		if repoSize.InPack > 0 {
-			log.Warn("In the repository there are pack files")
-		}
-
 		// Calculating total size of the push using `git count-objects`
 		pushSize, err = git.CountObjectsWithEnv(ctx, repo.RepoPath(), ourCtx.env)
 		if err != nil {
@@ -410,7 +405,8 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 
 		// Cache whether the repository would breach the size limit after the operation
 		isRepoOversized = repo.IsRepoSizeOversized(pushSize.Size + pushSize.SizePack)
-		log.Trace("Push size %+v", pushSize)
+		log.Warn("Push counts %+v", pushSize)
+		log.Warn("Repo counts %+v", repoSize)
 	}
 
 	// Iterate across the provided old commit IDs
