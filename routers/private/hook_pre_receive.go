@@ -168,7 +168,7 @@ func convertObjectsToMap(objects string) map[string]bool {
 	return objectsMap
 }
 
-// convertObjectsToSlie converts a list of hashes in a string from the git rev-list --objects command to a slice of string objects
+// convertObjectsToSlice converts a list of hashes in a string from the git rev-list --objects command to a slice of string objects
 func convertObjectsToSlice(objects string) (objectIDs []string) {
 	for _, object := range strings.Split(objects, "\n") {
 		if len(object) == 0 {
