@@ -512,7 +512,7 @@ func (repo *Repository) IsRepoSizeOversized(additionalSize int64) bool {
 }
 
 // RepoSizeLimitEnabled return true if size limit checking is enabled and limit is non zero for this specific repository
-// this is used to enable size checking during pre-recieve hook
+// this is used to enable size checking during pre-receive hook
 func (repo *Repository) IsRepoSizeLimitEnabled() bool {
 	return setting.EnableSizeLimit && repo.GetActualSizeLimit() > 0
 }
