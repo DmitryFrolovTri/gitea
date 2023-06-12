@@ -182,8 +182,7 @@ func convertObjectsToSlice(objects string) (objectIDs []string) {
 
 // loadObjectSizesFromPack access all packs that this push or repo has
 // and load compressed object size in bytes into objectSizes map
-// from `git verify-pack -v` output
-//
+// using `git verify-pack -v` output
 func loadObjectSizesFromPack(ctx *gitea_context.PrivateContext, opts *git.RunOpts, objectIDs []string, objectsSizes map[string]int64) error {
 
 	// Find the path from GIT_QUARANTINE_PATH environment variable (path to the pack file)
@@ -303,10 +302,22 @@ func loadObjectsSizesViaCatFile(ctx *gitea_context.PrivateContext, opts *git.Run
 func loadObjectsSizesViaBatch(ctx *gitea_context.PrivateContext, repoPath string, objectIDs []string, objectsSizes map[string]int64) error {
 	var i int32
 
+	reducedObjectIDs := make([]string, 0, len(objectIDs))
+
+	// Loop over all objectIDs and find which ones are missing size information
+	for _, objectID := range objectIDs {
+		_, exists := objectsSizes[objectID]
+
+		//if object doesn't yet have size in objectsSizes add it for further processing
+		if !exists {
+			reducedObjectIDs = append(reducedObjectIDs, objectID)
+		}
+	}
+
 	wr, rd, cancel := git.CatFileBatchCheck(ctx, repoPath)
 	defer cancel()
 
-	for _, commitID := range objectIDs {
+	for _, commitID := range reducedObjectIDs {
 		_, err := wr.Write([]byte(commitID + "\n"))
 		if err != nil {
 			return err
@@ -431,14 +442,6 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 			commitObjectsSizes := make(map[string]int64)
 			oldCommitObjects := convertObjectsToMap(gitObjects)
 			objectIDs := convertObjectsToSlice(gitObjects)
-			error = loadObjectsSizesViaBatch(ctx, repo.RepoPath(), objectIDs, commitObjectsSizes)
-			if error != nil {
-				log.Error("Unable to get sizes of objects in old commit %s in %-v Error: %v", oldCommitID, repo, error)
-				ctx.JSON(http.StatusInternalServerError, private.Response{
-					Err: fmt.Sprintf("Fail to get sizes of objects in old commit: %v", err),
-				})
-				return
-			}
 
 			// Create cache of objects that are in the repository but not part of old or new commit
 			// if oldCommitID all 0 then it's a fresh repository on gitea server and all git operations on such oldCommitID would fail
@@ -464,7 +467,22 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 			}
 
 			otherCommitObjects := convertObjectsToMap(gitObjects)
-			objectIDs = convertObjectsToSlice(gitObjects)
+			objectIDs = append(objectIDs, convertObjectsToSlice(gitObjects)...)
+			// Unfortunately `git cat-file --check-batch` shows full object size
+			// so we would load compressed sizes from pack file via `git verify-pack -v` if there are pack files in repo
+			// The result would still miss items that are loose as individual objects (not part of pack files)
+			if repoSize.InPack > 0 {
+				error = loadObjectSizesFromPack(ctx, &git.RunOpts{Dir: repo.RepoPath(), Env: nil}, objectIDs, commitObjectsSizes)
+				if error != nil {
+					log.Error("Unable to get sizes of objects from the pack in %-v Error: %v", repo, error)
+					ctx.JSON(http.StatusInternalServerError, private.Response{
+						Err: fmt.Sprintf("Fail to get sizes of objects in repo: %v", err),
+					})
+					return
+				}
+			}
+
+			// Load loose objects that are missing
 			error = loadObjectsSizesViaBatch(ctx, repo.RepoPath(), objectIDs, commitObjectsSizes)
 			if error != nil {
 				log.Error("Unable to get sizes of objects that are missing in both old %s and new commits %s in %-v Error: %v", oldCommitID, newCommitID, repo, error)
@@ -537,8 +555,7 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 
 	// If total of commits add more size then they remove and we are in a potential breach of size limit -- abort
 	if (addedSize > removedSize) && isRepoOversized {
-		//if true {
-		log.Warn("Forbidden: new repo size %s is over limitation of %s. Push size: %s. Took %s seconds. addedSize: %s. removedSize: %s", base.FileSize(addedSize-removedSize), base.FileSize(repo.GetActualSizeLimit()), base.FileSize(pushSize.Size+pushSize.SizePack), duration, base.FileSize(addedSize), base.FileSize(removedSize))
+		log.Warn("Forbidden: new repo size %s would be over limitation of %s. Push size: %s. Took %s seconds. addedSize: %s. removedSize: %s", base.FileSize(repo.Size+addedSize-removedSize), base.FileSize(repo.GetActualSizeLimit()), base.FileSize(pushSize.Size+pushSize.SizePack), duration, base.FileSize(addedSize), base.FileSize(removedSize))
 		ctx.JSON(http.StatusForbidden, private.Response{
 			UserMsg: fmt.Sprintf("New repository size is over limitation of %s", base.FileSize(repo.GetActualSizeLimit())),
 		})
