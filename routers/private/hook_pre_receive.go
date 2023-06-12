@@ -483,7 +483,7 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 			if error != nil {
 				log.Error("Unable to get sizes of objects that are missing in both old %s and new commits %s in %-v Error: %v", oldCommitID, newCommitID, repo, error)
 				ctx.JSON(http.StatusInternalServerError, private.Response{
-					Err: fmt.Sprintf("Fail to get sizes of objects missing in both old and new commit: %v", err),
+					Err: fmt.Sprintf("Fail to get sizes of objects missing in both old and new commit and those in old commit: %v", err),
 				})
 				return
 			}
@@ -515,7 +515,7 @@ func HookPreReceive(ctx *gitea_context.PrivateContext) {
 			}
 
 			// After loading everything we could from pack file, objects could have been sent as loose bunch as well
-			// We need to load them individually with `git cat-file -s` on any object that is missing accumulated size cache commitObjectsSizes
+			// We need to load them individually with `git cat-file -s` on any object that is missing from accumulated size cache commitObjectsSizes
 			error = loadObjectsSizesViaCatFile(ctx, &git.RunOpts{Dir: repo.RepoPath(), Env: ourCtx.env}, objectIDs, commitObjectsSizes)
 			if error != nil {
 				log.Error("Unable to get sizes of objects in new commit %s in %-v Error: %v", newCommitID, repo, error)
